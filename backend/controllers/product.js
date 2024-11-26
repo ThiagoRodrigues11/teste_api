@@ -1,158 +1,135 @@
 const { Product } = require('../models');
 const multer = require('multer');
 const uploadToCloudinary = require('../middlewares/upload-cloud');
-const upload = multer({ storage: multer.memoryStorage() });
 const { v4: uuidv4 } = require('uuid');
 const { body, validationResult } = require('express-validator');
 
-/**
- * Creates a new product
- * @param {*} req
- * @param {*} res
- * @returns Object
- */
-const createProduct = [
-  // Upload de arquivo em disco
-  upload.single('productImage'),
+// Middleware de upload em memória
+const upload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Formato de arquivo não suportado. Apenas JPG e PNG são aceitos.'));
+    }
+  },
+});
 
-  // Upload de arquivo em nuvem
+// Criar produto
+const createProduct = [
+  upload.single('productImage'),
   uploadToCloudinary,
   body('name').notEmpty().withMessage('Nome é obrigatório'),
   body('price').isNumeric().withMessage('O preço deve ser numérico'),
 
   async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    // Transformação dos dados
-    const transformedData = {
-      ...req.body,
-      id: uuidv4(),
-      name: req.body.name.toLowerCase(),
-      // productImage: req.file ? req.file.filename : null, // Upload de arquivo em disco
-      productImage: req.cloudinaryUrl || null, // Upload de arquivo em nuvem
-      expiryDate: new Date()
-    };
-
     try {
+      const transformedData = {
+        ...req.body,
+        id: uuidv4(),
+        name: req.body.name.toLowerCase(),
+        productImage: req.cloudinaryUrl || null,
+        expiryDate: new Date(),
+      };
+
       const product = await Product.create(transformedData);
-      return res.status(201).json(
-        product
-      );
+      return res.status(201).json(product);
     } catch (error) {
+      console.error('Erro ao criar produto:', error.message);
       return res.status(500).json({ error: error.message });
     }
-  }
+  },
 ];
 
-
-/**
- * Fetches all products
- * @param {*} req
- * @param {*} res
- * @returns Object
- */
-const getAllProducts = async (req, res) => {
-  try {
-    const products = await Product.findAll({ order: [['createdAt', 'DESC']] })
-
-    return res.status(200).json( products )
-  } catch (error) {
-    return res.status(500).send(error.message)
-  }
-}
-
-/**
- * Gets a single product by it's id
- * @param {*} req
- * @param {*} res
- * @returns boolean
- */
-const getProductById = async (req, res) => {
-  try {
-    const { id } = req.params
-    const product = await Product.findOne({
-      where: { id: id }
-    })
-
-    if (product) {
-      return res.status(200).json( product )
-    }
-
-    return res.status(404).send('Product with the specified ID does not exist')
-  } catch (error) {
-    return res.status(500).send(error.message)
-  }
-}
-/**
- * Updates a single product by it's id
- * @param {*} req
- * @param {*} res
- * @returns boolean
- */
+// Atualizar produto
 const updateProductById = [
+  upload.single('productImage'),
+  uploadToCloudinary,
   body('name').optional().notEmpty().withMessage('Nome não pode estar vazio'),
   body('price').optional().isNumeric().withMessage('O preço deve ser numérico'),
 
   async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
     try {
+      console.log('Arquivo recebido pelo multer:', req.file);
+
       const { id } = req.params;
-      let product = await Product.findOne({ where: { id: id } });
+      const product = await Product.findOne({ where: { id } });
 
       if (!product) {
-        return res.status(404).send('Product not found');
+        return res.status(404).json({ error: 'Produto não encontrado' });
       }
 
-      // Transformação de dados antes de atualizar
-      const updatedData = req.body;
-      if (updatedData.name) {
-        updatedData.name = updatedData.name.toLowerCase(); // Converter nome para minúsculo
+      const updatedData = { ...req.body };
+
+      if (req.cloudinaryUrl) {
+        console.log('Nova URL do Cloudinary:', req.cloudinaryUrl);
+        updatedData.productImage = req.cloudinaryUrl;
+      } else {
+        console.log('Nenhuma nova URL do Cloudinary disponível.');
       }
 
       await product.update(updatedData);
-      return res.status(200).json( product );
+      console.log('Produto atualizado com sucesso:', updatedData);
+
+      return res.status(200).json(product);
     } catch (error) {
-      return res.status(500).send(error.message);
+      console.error('Erro ao atualizar produto:', error.message);
+      return res.status(500).json({ error: error.message });
     }
-  }
+  },
 ];
 
-
-/**
- * Deletes a single product by it's id
- * @param {*} req
- * @param {*} res
- * @returns boolean
- */
-const deleteProductById = async (req, res) => {
+// Buscar todos os produtos
+const getAllProducts = async (req, res) => {
   try {
-    const { id } = req.params
+    const products = await Product.findAll({ order: [['createdAt', 'DESC']] });
+    return res.status(200).json(products);
+  } catch (error) {
+    console.error('Erro ao buscar produtos:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+};
 
-    const deletedProduct = await Product.destroy({
-      where: { id: id }
-    })
+// Buscar produto por ID
+const getProductById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const product = await Product.findOne({ where: { id } });
 
-    if (deletedProduct) {
-      return res.status(204).send('Product deleted successfully ')
+    if (!product) {
+      return res.status(404).json({ error: 'Produto não encontrado' });
     }
 
-    throw new Error('Product not found')
+    return res.status(200).json(product);
   } catch (error) {
-    return res.status(500).send(error.message)
+    console.error('Erro ao buscar produto por ID:', error.message);
+    return res.status(500).json({ error: error.message });
   }
-}
+};
+
+// Deletar produto
+const deleteProductById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deletedProduct = await Product.destroy({ where: { id } });
+
+    if (!deletedProduct) {
+      return res.status(404).json({ error: 'Produto não encontrado' });
+    }
+
+    return res.status(200).json({ message: 'Produto deletado com sucesso' });
+  } catch (error) {
+    console.error('Erro ao deletar produto:', error.message);
+    return res.status(500).json({ error: error.message });
+  }
+};
 
 module.exports = {
   createProduct,
+  updateProductById,
   getAllProducts,
   getProductById,
   deleteProductById,
-  updateProductById
-}
+};

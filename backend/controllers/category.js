@@ -1,39 +1,55 @@
 const { Category, Product } = require('../models');
 const { v4: uuidv4 } = require('uuid');
 const transporter = require('../config/nodemailer');
+const { body, validationResult } = require('express-validator');
+
+// Middleware para validar os dados da categoria
+const validateCategory = [
+  body('name').notEmpty().withMessage('O nome da categoria é obrigatório'),
+  (req, res, next) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ errors: errors.array() });
+    }
+    next();
+  },
+];
 
 /**
- * Creates a new category
+ * Cria uma nova categoria e envia um e-mail de notificação
  * @param {*} req
  * @param {*} res
  * @returns Object
  */
-const createCategory = async (req, res) => {
-  try {
-    const category = await Category.create({...req.body, id: uuidv4()});
+const createCategory = [
+  validateCategory,
+  async (req, res) => {
+    try {
+      const category = await Category.create({ ...req.body, id: uuidv4() });
 
-    // Enviar email de notificação para o administrador
-    const mailOptions = {
-      from: 'paulo.gomes@uncisal.edu.br',
-      to: 'paulohenriquegomessilva1@gmail.com',
-      subject: 'Nova categoria criada',
-      text: `Uma nova categoria foi criada na aula do dia 18/11/2024: ${category.name}`,
-      html: `<p>Uma nova categoria foi criada na aula do dia 18/11/2024: ${category.name}</p>`,
-    };
+      // Configurar e enviar e-mail de notificação
+      const mailOptions = {
+        from: 'thiago.taroco@uncisal.edu.br',
+        to: 'thiagortaroco@gmail.com',
+        subject: 'Nova categoria criada',
+        text: `Uma nova categoria foi criada: ${category.name}`,
+        html: `<p>Uma nova categoria foi criada: <strong>${category.name}</strong></p>`,
+      };
 
-    // Enviar email
-    await transporter.sendMail(mailOptions);
+      await transporter.sendMail(mailOptions);
 
-    return res.status(201).json(
-      category,
-    );
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-};
+      return res.status(201).json({
+        message: 'Categoria criada com sucesso!',
+        category,
+      });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
+    }
+  },
+];
 
 /**
- * Fetches all categories
+ * Busca todas as categorias ordenadas por data de criação
  * @param {*} req
  * @param {*} res
  * @returns Object
@@ -50,83 +66,90 @@ const getAllCategories = async (req, res) => {
 };
 
 /**
- * Gets a single category by it's id
+ * Busca uma categoria pelo ID
  * @param {*} req
  * @param {*} res
- * @returns boolean
+ * @returns Object
  */
 const getCategoryById = async (req, res) => {
   try {
     const { id } = req.params;
 
     const category = await Category.findOne({
-      where: { id: id },
-      order: [['createdAt', 'DESC']],
+      where: { id },
     });
 
     if (category) {
       return res.status(200).json(category);
     }
 
-    return res
-      .status(404)
-      .send('Category with the specified ID does not exist');
+    return res.status(404).json({ error: 'Categoria não encontrada' });
   } catch (error) {
     return res.status(500).send(error.message);
   }
 };
 
 /**
- * Updates a single category by it's id
+ * Atualiza uma categoria pelo ID e envia um e-mail de notificação
  * @param {*} req
  * @param {*} res
- * @returns boolean
+ * @returns Object
  */
-const updateCategory = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const [updated] = await Category.update(req.body, { where: { id: id } });
+const updateCategory = [
+  validateCategory,
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const [updated] = await Category.update(req.body, { where: { id } });
 
-    if (updated) {
-      const updatedCategory = await Category.findOne({
-        where: { id: id },
-        include: [
-          {
-            model: Product,
-          },
-        ],
-      });
-      return res.status(200).json(updatedCategory);
+      if (updated) {
+        const updatedCategory = await Category.findOne({
+          where: { id },
+          include: [Product],
+        });
+
+        // Configurar e enviar e-mail de notificação
+        const mailOptions = {
+          from: 'thiago.taroco@uncisal.edu.br',
+          to: 'thiagortaroco@gmail.com',
+          subject: 'Categoria Atualizada',
+          text: `A categoria "${updatedCategory.name}" foi atualizada com sucesso!`,
+          html: `<p>A categoria <strong>${updatedCategory.name}</strong> foi atualizada com sucesso!</p>`,
+        };
+
+        await transporter.sendMail(mailOptions);
+
+        return res.status(200).json({
+          message: 'Categoria atualizada com sucesso!',
+          category: updatedCategory,
+        });
+      }
+
+      return res.status(404).json({ error: 'Categoria não encontrada' });
+    } catch (error) {
+      return res.status(500).json({ error: error.message });
     }
-
-    throw new Error('Category not found ');
-  } catch (error) {
-    return res.status(500).send(error.message);
-  }
-};
+  },
+];
 
 /**
- * Deletes a single category by it's id
+ * Deleta uma categoria pelo ID
  * @param {*} req
  * @param {*} res
- * @returns Boolean
+ * @returns Object
  */
 const deleteCategory = async (req, res) => {
   try {
     const { id } = req.params;
-    const deleted = await Category.destroy({
-      where: {
-        id: id,
-      },
-    });
+    const deleted = await Category.destroy({ where: { id } });
 
     if (deleted) {
-      return res.status(204).send('Category deleted');
+      return res.status(200).json({ message: 'Categoria deletada com sucesso' });
     }
 
-    throw new Error('Category not found ');
+    return res.status(404).json({ error: 'Categoria não encontrada' });
   } catch (error) {
-    return res.status(500).send(error.message);
+    return res.status(500).json({ error: error.message });
   }
 };
 
